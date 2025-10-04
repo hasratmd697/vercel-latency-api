@@ -1,5 +1,4 @@
-# /api/latency.py
-
+import os
 import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,66 +9,60 @@ from typing import List
 app = FastAPI()
 
 # 2. Enable CORS
-# This allows web pages from any domain to make requests to your API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# 3. Load the data into a pandas DataFrame
-# This is done once when the app starts, which is efficient.
+# 3. Load the data using a robust file path
+# CHANGE #2: Use os.path.join to create a reliable path to the data file.
+script_dir = os.path.dirname(__file__)
+file_path = os.path.join(script_dir, 'q-vercel-latency.json')
+
 try:
-    df = pd.read_json('api/q-vercel-latency.json')
+    df = pd.read_json(file_path)
 except Exception as e:
-    # If the file isn't found, create an empty DataFrame to avoid crashing
     df = pd.DataFrame()
     print(f"Could not load data file: {e}")
 
 # 4. Define the structure of the incoming POST request data
-# Pydantic models automatically validate the incoming data.
 class RequestData(BaseModel):
     regions: List[str]
     threshold_ms: int
 
 # 5. Create the API endpoint
-@app.post("/api/latency")
+# CHANGE #1: The path should be "/" because Vercel handles the "/api/latency" part.
+@app.post("/")
 def get_latency_metrics(data: RequestData):
-    """
-    This endpoint calculates latency metrics for specified regions.
-    """
     results = {}
     
-    # Check if the dataframe is empty
     if df.empty:
         return {"error": "Data file not loaded or is empty."}
 
-    # 6. Loop through each region provided in the request
     for region in data.regions:
-        # Filter the DataFrame to get data for the current region only
         region_df = df[df['region'] == region]
 
-        # If there's no data for that region, skip it
         if region_df.empty:
             results[region] = {"error": "No data available for this region"}
             continue
 
-        # 7. Calculate the required metrics using pandas
+        # Calculate metrics
         avg_latency = region_df['latency_ms'].mean()
         p95_latency = region_df['latency_ms'].quantile(0.95)
-        avg_uptime = region_df['uptime_percentage'].mean()
         
-        # Count how many records are above the threshold
+        # CHANGE #3: Use the correct column name 'uptime_ms'.
+        avg_uptime = region_df['uptime_ms'].mean() 
+        
         breaches = (region_df['latency_ms'] > data.threshold_ms).sum()
 
-        # 8. Store the calculated metrics in the results dictionary
         results[region] = {
             "avg_latency": avg_latency,
             "p95_latency": p95_latency,
             "avg_uptime": avg_uptime,
-            "breaches": int(breaches) # Convert from numpy int to standard int
+            "breaches": int(breaches)
         }
 
     return results
